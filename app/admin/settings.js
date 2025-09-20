@@ -1,10 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Switch, Modal } from 'react-native';
-import { 
-  Settings, Users, MapPin, Building, Bell, Shield, Database, 
-  Activity, Save, Plus, CreditCard as Edit, Trash2, X, CheckCircle,
-  AlertTriangle, Clock, FileText, MessageSquare
-} from 'lucide-react-native';
+import { Settings, Users, MapPin, Building, Bell, Shield, Database, Activity, Save, Plus, CreditCard as Edit, Trash2, X, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Clock, FileText, MessageSquare } from 'lucide-react-native';
 import { supabase } from '../../lib/supabase';
 
 export default function AdminSettings() {
