@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, RefreshControl, Modal, TextInput, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChartBar as BarChart3, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, MapPin, Filter, Search, Settings, LogOut, MessageSquare, FileText, DollarSign, Calendar, Eye, CreditCard as Edit, Trash2, Plus, Send, UserCheck, Building } from 'lucide-react-native';
+import { ChartBar as BarChart3, Users, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, MapPin, Filter, Search, Settings, LogOut, MessageSquare, FileText, DollarSign, Calendar, Eye, CreditCard as Edit, Trash2, Plus, Send, UserCheck, Building, Activity, TrendingUp } from 'lucide-react-native';
 import { 
   getIssues, 
   getTenders, 
@@ -12,6 +12,8 @@ import {
   getUserProfile,
   signOut
 } from '../../lib/supabase';
+
+const { width } = Dimensions.get('window');
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -50,15 +52,17 @@ export default function AdminDashboard() {
     budgetMin: '',
     budgetMax: '',
     deadline: '',
-    requirements: ''
+    requirements: '',
+    location: '',
+    category: ''
   });
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'issues', label: 'Issues', icon: AlertTriangle },
+    { id: 'issues', label: 'Issue Management', icon: AlertTriangle },
     { id: 'tenders', label: 'Tenders', icon: FileText },
     { id: 'users', label: 'Users', icon: Users },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp },
     { id: 'feedback', label: 'Feedback', icon: MessageSquare },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
@@ -78,13 +82,12 @@ export default function AdminDashboard() {
     { id: 'other', label: 'Other', color: '#6B7280' }
   ];
 
+  // Updated 3-phase status system
   const statuses = [
     { id: 'all', label: 'All Status' },
-    { id: 'pending', label: 'Pending', color: '#F59E0B' },
-    { id: 'acknowledged', label: 'Acknowledged', color: '#3B82F6' },
-    { id: 'in_progress', label: 'In Progress', color: '#1E40AF' },
-    { id: 'resolved', label: 'Resolved', color: '#10B981' },
-    { id: 'closed', label: 'Closed', color: '#6B7280' }
+    { id: 'pending', label: 'Reported', color: '#F59E0B', description: 'User has raised the issue' },
+    { id: 'in_progress', label: 'In Progress', color: '#1E40AF', description: 'Contractor has accepted and started work' },
+    { id: 'resolved', label: 'Resolved', color: '#10B981', description: 'Issue has been completed and closed' }
   ];
 
   const priorities = [
@@ -212,14 +215,14 @@ export default function AdminDashboard() {
         assigned_department: assignmentData.department,
         assigned_to: assignmentData.assignedTo,
         priority: assignmentData.priority,
-        status: 'acknowledged',
+        status: 'in_progress', // Move to In Progress phase
         estimated_resolution_date: assignmentData.estimatedDate || null
       };
 
       const { error } = await updateIssue(selectedIssue.id, updates);
       if (error) throw error;
 
-      Alert.alert('Success', 'Issue assigned successfully');
+      Alert.alert('Success', 'Issue assigned and moved to In Progress');
       setShowAssignModal(false);
       setSelectedIssue(null);
       await loadDashboardData();
@@ -237,14 +240,16 @@ export default function AdminDashboard() {
       budgetMin: '',
       budgetMax: '',
       deadline: '',
-      requirements: ''
+      requirements: '',
+      location: issue.location_name || issue.address || '',
+      category: issue.category
     });
     setShowTenderModal(true);
   };
 
   const submitTender = async () => {
     if (!selectedIssue || !tenderData.title || !tenderData.budgetMin || !tenderData.deadline) {
-      Alert.alert('Error', 'Please fill in all required fields');
+      Alert.alert('Error', 'Please fill in all required fields (Title, Budget Min, Deadline)');
       return;
     }
 
@@ -252,23 +257,29 @@ export default function AdminDashboard() {
       const tender = {
         title: tenderData.title,
         description: tenderData.description,
+        category: tenderData.category,
+        location: tenderData.location,
+        area: selectedIssue.area,
+        ward: selectedIssue.ward,
         estimated_budget_min: parseFloat(tenderData.budgetMin),
         estimated_budget_max: parseFloat(tenderData.budgetMax) || parseFloat(tenderData.budgetMin),
         deadline_date: tenderData.deadline,
-        submission_deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
-        requirements: tenderData.requirements.split('\n').filter(r => r.trim())
+        submission_deadline: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 days from now
+        requirements: tenderData.requirements.split('\n').filter(r => r.trim()),
+        priority: selectedIssue.priority,
+        status: 'available'
       };
 
       const { error } = await createTenderFromIssue(selectedIssue.id, tender);
       if (error) throw error;
 
-      Alert.alert('Success', 'Tender created successfully');
+      Alert.alert('Success', 'Tender created successfully and issue moved to In Progress');
       setShowTenderModal(false);
       setSelectedIssue(null);
       await loadDashboardData();
     } catch (error) {
       console.error('Error creating tender:', error);
-      Alert.alert('Error', 'Failed to create tender');
+      Alert.alert('Error', 'Failed to create tender: ' + error.message);
     }
   };
 
@@ -277,12 +288,19 @@ export default function AdminDashboard() {
       const updates = { status: newStatus };
       if (newStatus === 'resolved') {
         updates.actual_resolution_date = new Date().toISOString();
+        updates.resolved_at = new Date().toISOString();
       }
 
       const { error } = await updateIssue(issueId, updates);
       if (error) throw error;
 
-      Alert.alert('Success', 'Status updated successfully');
+      const statusLabels = {
+        'pending': 'Reported',
+        'in_progress': 'In Progress', 
+        'resolved': 'Resolved'
+      };
+
+      Alert.alert('Success', `Issue status updated to ${statusLabels[newStatus]}`);
       await loadDashboardData();
     } catch (error) {
       console.error('Error updating status:', error);
@@ -335,6 +353,60 @@ export default function AdminDashboard() {
     });
   };
 
+  const getPhaseProgress = (status) => {
+    switch (status) {
+      case 'pending': return 1;
+      case 'in_progress': return 2;
+      case 'resolved': return 3;
+      default: return 1;
+    }
+  };
+
+  const renderPhaseIndicator = (currentStatus) => {
+    const currentPhase = getPhaseProgress(currentStatus);
+    
+    return (
+      <View style={styles.phaseIndicator}>
+        <View style={styles.phaseStep}>
+          <View style={[
+            styles.phaseCircle,
+            currentPhase >= 1 && styles.phaseCircleActive,
+            { backgroundColor: currentPhase >= 1 ? '#F59E0B' : '#E5E7EB' }
+          ]}>
+            <Text style={[styles.phaseNumber, currentPhase >= 1 && styles.phaseNumberActive]}>1</Text>
+          </View>
+          <Text style={styles.phaseLabel}>Reported</Text>
+        </View>
+        
+        <View style={[styles.phaseLine, currentPhase >= 2 && styles.phaseLineActive]} />
+        
+        <View style={styles.phaseStep}>
+          <View style={[
+            styles.phaseCircle,
+            currentPhase >= 2 && styles.phaseCircleActive,
+            { backgroundColor: currentPhase >= 2 ? '#1E40AF' : '#E5E7EB' }
+          ]}>
+            <Text style={[styles.phaseNumber, currentPhase >= 2 && styles.phaseNumberActive]}>2</Text>
+          </View>
+          <Text style={styles.phaseLabel}>In Progress</Text>
+        </View>
+        
+        <View style={[styles.phaseLine, currentPhase >= 3 && styles.phaseLineActive]} />
+        
+        <View style={styles.phaseStep}>
+          <View style={[
+            styles.phaseCircle,
+            currentPhase >= 3 && styles.phaseCircleActive,
+            { backgroundColor: currentPhase >= 3 ? '#10B981' : '#E5E7EB' }
+          ]}>
+            <Text style={[styles.phaseNumber, currentPhase >= 3 && styles.phaseNumberActive]}>3</Text>
+          </View>
+          <Text style={styles.phaseLabel}>Resolved</Text>
+        </View>
+      </View>
+    );
+  };
+
   const renderOverview = () => (
     <View style={styles.tabContent}>
       {/* Quick Stats */}
@@ -349,22 +421,22 @@ export default function AdminDashboard() {
         <View style={styles.statCard}>
           <Clock size={24} color="#F59E0B" />
           <Text style={styles.statNumber}>{dashboardStats.pending_issues || 0}</Text>
-          <Text style={styles.statLabel}>Pending</Text>
-          <Text style={styles.statTrend}>{dashboardStats.response_time || '0 days'} avg</Text>
+          <Text style={styles.statLabel}>Reported</Text>
+          <Text style={styles.statTrend}>Awaiting assignment</Text>
+        </View>
+
+        <View style={styles.statCard}>
+          <Activity size={24} color="#1E40AF" />
+          <Text style={styles.statNumber}>{dashboardStats.in_progress_issues || 0}</Text>
+          <Text style={styles.statLabel}>In Progress</Text>
+          <Text style={styles.statTrend}>Being worked on</Text>
         </View>
 
         <View style={styles.statCard}>
           <CheckCircle size={24} color="#10B981" />
-          <Text style={styles.statNumber}>{dashboardStats.resolution_rate || 0}%</Text>
-          <Text style={styles.statLabel}>Resolution Rate</Text>
-          <Text style={styles.statTrend}>+5% this month</Text>
-        </View>
-
-        <View style={styles.statCard}>
-          <Users size={24} color="#8B5CF6" />
-          <Text style={styles.statNumber}>{dashboardStats.active_users || 0}</Text>
-          <Text style={styles.statLabel}>Active Users</Text>
-          <Text style={styles.statTrend}>{dashboardStats.total_users || 0} total</Text>
+          <Text style={styles.statNumber}>{dashboardStats.resolved_issues || 0}</Text>
+          <Text style={styles.statLabel}>Resolved</Text>
+          <Text style={styles.statTrend}>{dashboardStats.resolution_rate || 0}% rate</Text>
         </View>
       </View>
 
@@ -383,11 +455,13 @@ export default function AdminDashboard() {
               <View style={[styles.priorityDot, { backgroundColor: getPriorityColor(issue.priority) }]} />
               <Text style={styles.issueTitle} numberOfLines={1}>{issue.title}</Text>
               <Text style={[styles.issueStatus, { color: getStatusColor(issue.status) }]}>
-                {issue.status}
+                {issue.status === 'pending' ? 'Reported' : 
+                 issue.status === 'in_progress' ? 'In Progress' : 'Resolved'}
               </Text>
             </View>
             <Text style={styles.issueLocation}>{issue.location_name || issue.address}</Text>
             <Text style={styles.issueDate}>{formatDate(issue.created_at)}</Text>
+            {renderPhaseIndicator(issue.status)}
           </TouchableOpacity>
         ))}
       </View>
@@ -396,6 +470,28 @@ export default function AdminDashboard() {
 
   const renderIssues = () => (
     <View style={styles.tabContent}>
+      {/* Phase Overview */}
+      <View style={styles.phaseOverview}>
+        <Text style={styles.sectionTitle}>3-Phase Issue Management</Text>
+        <View style={styles.phaseCards}>
+          <View style={[styles.phaseCard, { borderLeftColor: '#F59E0B' }]}>
+            <Text style={styles.phaseCardNumber}>{issues.filter(i => i.status === 'pending').length}</Text>
+            <Text style={styles.phaseCardTitle}>Reported</Text>
+            <Text style={styles.phaseCardDesc}>User has raised the issue</Text>
+          </View>
+          <View style={[styles.phaseCard, { borderLeftColor: '#1E40AF' }]}>
+            <Text style={styles.phaseCardNumber}>{issues.filter(i => i.status === 'in_progress').length}</Text>
+            <Text style={styles.phaseCardTitle}>In Progress</Text>
+            <Text style={styles.phaseCardDesc}>Contractor working on it</Text>
+          </View>
+          <View style={[styles.phaseCard, { borderLeftColor: '#10B981' }]}>
+            <Text style={styles.phaseCardNumber}>{issues.filter(i => i.status === 'resolved').length}</Text>
+            <Text style={styles.phaseCardTitle}>Resolved</Text>
+            <Text style={styles.phaseCardDesc}>Issue completed & closed</Text>
+          </View>
+        </View>
+      </View>
+
       {/* Filters */}
       <View style={styles.filtersContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -426,7 +522,7 @@ export default function AdminDashboard() {
 
             {/* Status Filter */}
             <View style={styles.filterGroup}>
-              <Text style={styles.filterLabel}>Status</Text>
+              <Text style={styles.filterLabel}>Phase</Text>
               <View style={styles.filterButtons}>
                 {statuses.map(status => (
                   <TouchableOpacity
@@ -492,7 +588,8 @@ export default function AdminDashboard() {
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(issue.status) + '20' }]}>
                   <Text style={[styles.statusText, { color: getStatusColor(issue.status) }]}>
-                    {issue.status.replace('_', ' ').toUpperCase()}
+                    {issue.status === 'pending' ? 'REPORTED' : 
+                     issue.status === 'in_progress' ? 'IN PROGRESS' : 'RESOLVED'}
                   </Text>
                 </View>
               </View>
@@ -504,6 +601,9 @@ export default function AdminDashboard() {
             <Text style={styles.detailedIssueDescription} numberOfLines={2}>
               {issue.description}
             </Text>
+
+            {/* Phase Progress */}
+            {renderPhaseIndicator(issue.status)}
 
             {/* Issue Details */}
             <View style={styles.issueDetails}>
@@ -536,47 +636,42 @@ export default function AdminDashboard() {
 
             {/* Action Buttons */}
             <View style={styles.issueActions}>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.assignButton]}
-                onPress={() => handleAssignIssue(issue)}
-              >
-                <UserCheck size={14} color="#FFFFFF" />
-                <Text style={styles.actionButtonText}>Assign</Text>
-              </TouchableOpacity>
+              {issue.status === 'pending' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.assignButton]}
+                    onPress={() => handleAssignIssue(issue)}
+                  >
+                    <UserCheck size={14} color="#FFFFFF" />
+                    <Text style={styles.actionButtonText}>Assign & Start</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.actionButton, styles.tenderButton]}
-                onPress={() => handleCreateTender(issue)}
-              >
-                <FileText size={14} color="#FFFFFF" />
-                <Text style={styles.actionButtonText}>Create Tender</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.tenderButton]}
+                    onPress={() => handleCreateTender(issue)}
+                  >
+                    <FileText size={14} color="#FFFFFF" />
+                    <Text style={styles.actionButtonText}>Create Tender</Text>
+                  </TouchableOpacity>
+                </>
+              )}
 
-              <TouchableOpacity
-                style={[styles.actionButton, styles.statusButton]}
-                onPress={() => {
-                  Alert.alert(
-                    'Update Status',
-                    'Select new status:',
-                    [
-                      { text: 'Acknowledged', onPress: () => handleUpdateStatus(issue.id, 'acknowledged') },
-                      { text: 'In Progress', onPress: () => handleUpdateStatus(issue.id, 'in_progress') },
-                      { text: 'Resolved', onPress: () => handleUpdateStatus(issue.id, 'resolved') },
-                      { text: 'Cancel', style: 'cancel' }
-                    ]
-                  );
-                }}
-              >
-                <CheckCircle size={14} color="#FFFFFF" />
-                <Text style={styles.actionButtonText}>Update Status</Text>
-              </TouchableOpacity>
+              {issue.status === 'in_progress' && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.resolveButton]}
+                  onPress={() => handleUpdateStatus(issue.id, 'resolved')}
+                >
+                  <CheckCircle size={14} color="#FFFFFF" />
+                  <Text style={styles.actionButtonText}>Mark Resolved</Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={[styles.actionButton, styles.viewButton]}
                 onPress={() => router.push(`/admin/issue-${issue.id}`)}
               >
                 <Eye size={14} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>View</Text>
+                <Text style={[styles.actionButtonText, { color: '#374151' }]}>View Details</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -649,9 +744,127 @@ export default function AdminDashboard() {
     </View>
   );
 
+  const renderSettings = () => (
+    <View style={styles.tabContent}>
+      <Text style={styles.sectionTitle}>System Settings</Text>
+      
+      {/* System Configuration */}
+      <View style={styles.settingsSection}>
+        <Text style={styles.settingsGroupTitle}>System Configuration</Text>
+        
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <Settings size={20} color="#1E40AF" />
+            <View>
+              <Text style={styles.settingTitle}>Issue Management Settings</Text>
+              <Text style={styles.settingDescription}>Configure issue categories, priorities, and workflows</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <FileText size={20} color="#8B5CF6" />
+            <View>
+              <Text style={styles.settingTitle}>Tender Management</Text>
+              <Text style={styles.settingDescription}>Configure tender categories, approval workflows</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <Users size={20} color="#10B981" />
+            <View>
+              <Text style={styles.settingTitle}>User Management</Text>
+              <Text style={styles.settingDescription}>Manage user roles, permissions, and verification</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <MessageSquare size={20} color="#F59E0B" />
+            <View>
+              <Text style={styles.settingTitle}>Communication Settings</Text>
+              <Text style={styles.settingDescription}>Configure notifications, email templates</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Data Management */}
+      <View style={styles.settingsSection}>
+        <Text style={styles.settingsGroupTitle}>Data Management</Text>
+        
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <BarChart3 size={20} color="#EF4444" />
+            <View>
+              <Text style={styles.settingTitle}>Analytics Configuration</Text>
+              <Text style={styles.settingDescription}>Set up reporting periods and metrics</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <MapPin size={20} color="#06B6D4" />
+            <View>
+              <Text style={styles.settingTitle}>Location Management</Text>
+              <Text style={styles.settingDescription}>Manage areas, wards, and geographic boundaries</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.settingItem}>
+          <View style={styles.settingInfo}>
+            <Building size={20} color="#8B5CF6" />
+            <View>
+              <Text style={styles.settingTitle}>Department Management</Text>
+              <Text style={styles.settingDescription}>Configure departments and their responsibilities</Text>
+            </View>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* System Health */}
+      <View style={styles.settingsSection}>
+        <Text style={styles.settingsGroupTitle}>System Health</Text>
+        
+        <View style={styles.healthMetrics}>
+          <View style={styles.healthMetric}>
+            <Text style={styles.healthValue}>99.9%</Text>
+            <Text style={styles.healthLabel}>Uptime</Text>
+          </View>
+          <View style={styles.healthMetric}>
+            <Text style={styles.healthValue}>1.2s</Text>
+            <Text style={styles.healthLabel}>Avg Response</Text>
+          </View>
+          <View style={styles.healthMetric}>
+            <Text style={styles.healthValue}>{issues.length}</Text>
+            <Text style={styles.healthLabel}>Total Records</Text>
+          </View>
+          <View style={styles.healthMetric}>
+            <Text style={styles.healthValue}>Active</Text>
+            <Text style={styles.healthLabel}>Database</Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
+        <Activity size={32} color="#1E40AF" />
         <Text style={styles.loadingText}>Loading Admin Dashboard...</Text>
       </View>
     );
@@ -711,31 +924,48 @@ export default function AdminDashboard() {
         {selectedTab === 'tenders' && renderTenders()}
         {selectedTab === 'users' && (
           <View style={styles.tabContent}>
-            <Text style={styles.comingSoon}>User Management - Coming Soon</Text>
+            <TouchableOpacity 
+              style={styles.navigationCard}
+              onPress={() => router.push('/admin/users')}
+            >
+              <Users size={24} color="#10B981" />
+              <Text style={styles.navigationTitle}>User Management</Text>
+              <Text style={styles.navigationDescription}>Manage users, roles, and permissions</Text>
+            </TouchableOpacity>
           </View>
         )}
         {selectedTab === 'analytics' && (
           <View style={styles.tabContent}>
-            <Text style={styles.comingSoon}>Analytics Dashboard - Coming Soon</Text>
+            <TouchableOpacity 
+              style={styles.navigationCard}
+              onPress={() => router.push('/admin/analytics')}
+            >
+              <TrendingUp size={24} color="#8B5CF6" />
+              <Text style={styles.navigationTitle}>Analytics Dashboard</Text>
+              <Text style={styles.navigationDescription}>View detailed analytics and reports</Text>
+            </TouchableOpacity>
           </View>
         )}
         {selectedTab === 'feedback' && (
           <View style={styles.tabContent}>
-            <Text style={styles.comingSoon}>Feedback Management - Coming Soon</Text>
+            <TouchableOpacity 
+              style={styles.navigationCard}
+              onPress={() => router.push('/admin/feedback-management')}
+            >
+              <MessageSquare size={24} color="#F59E0B" />
+              <Text style={styles.navigationTitle}>Feedback Management</Text>
+              <Text style={styles.navigationDescription}>Handle user feedback and responses</Text>
+            </TouchableOpacity>
           </View>
         )}
-        {selectedTab === 'settings' && (
-          <View style={styles.tabContent}>
-            <Text style={styles.comingSoon}>Settings - Coming Soon</Text>
-          </View>
-        )}
+        {selectedTab === 'settings' && renderSettings()}
       </ScrollView>
 
       {/* Assignment Modal */}
       <Modal visible={showAssignModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Assign Issue</Text>
+            <Text style={styles.modalTitle}>Assign Issue & Move to In Progress</Text>
             
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Department *</Text>
@@ -770,6 +1000,16 @@ export default function AdminDashboard() {
               />
             </View>
 
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Estimated Completion Date</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="YYYY-MM-DD"
+                value={assignmentData.estimatedDate}
+                onChangeText={(text) => setAssignmentData({...assignmentData, estimatedDate: text})}
+              />
+            </View>
+
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.modalCancelButton}
@@ -781,7 +1021,7 @@ export default function AdminDashboard() {
                 style={styles.modalSubmitButton}
                 onPress={submitAssignment}
               >
-                <Text style={styles.modalSubmitText}>Assign</Text>
+                <Text style={styles.modalSubmitText}>Assign & Start Work</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -791,64 +1031,100 @@ export default function AdminDashboard() {
       {/* Tender Creation Modal */}
       <Modal visible={showTenderModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create Tender</Text>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Title *</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Tender title"
-                value={tenderData.title}
-                onChangeText={(text) => setTenderData({...tenderData, title: text})}
-              />
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Budget Range *</Text>
-              <View style={styles.budgetRow}>
+          <ScrollView style={styles.modalScrollView}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Create Tender from Issue</Text>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Title *</Text>
                 <TextInput
-                  style={[styles.textInput, styles.budgetInput]}
-                  placeholder="Min ($)"
-                  value={tenderData.budgetMin}
-                  onChangeText={(text) => setTenderData({...tenderData, budgetMin: text})}
-                  keyboardType="numeric"
-                />
-                <TextInput
-                  style={[styles.textInput, styles.budgetInput]}
-                  placeholder="Max ($)"
-                  value={tenderData.budgetMax}
-                  onChangeText={(text) => setTenderData({...tenderData, budgetMax: text})}
-                  keyboardType="numeric"
+                  style={styles.textInput}
+                  placeholder="Tender title"
+                  value={tenderData.title}
+                  onChangeText={(text) => setTenderData({...tenderData, title: text})}
                 />
               </View>
-            </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Deadline *</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="YYYY-MM-DD"
-                value={tenderData.deadline}
-                onChangeText={(text) => setTenderData({...tenderData, deadline: text})}
-              />
-            </View>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Description</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="Detailed description of work required"
+                  value={tenderData.description}
+                  onChangeText={(text) => setTenderData({...tenderData, description: text})}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowTenderModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalSubmitButton}
-                onPress={submitTender}
-              >
-                <Text style={styles.modalSubmitText}>Create Tender</Text>
-              </TouchableOpacity>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Location</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Work location"
+                  value={tenderData.location}
+                  onChangeText={(text) => setTenderData({...tenderData, location: text})}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Budget Range *</Text>
+                <View style={styles.budgetRow}>
+                  <TextInput
+                    style={[styles.textInput, styles.budgetInput]}
+                    placeholder="Min ($)"
+                    value={tenderData.budgetMin}
+                    onChangeText={(text) => setTenderData({...tenderData, budgetMin: text})}
+                    keyboardType="numeric"
+                  />
+                  <TextInput
+                    style={[styles.textInput, styles.budgetInput]}
+                    placeholder="Max ($)"
+                    value={tenderData.budgetMax}
+                    onChangeText={(text) => setTenderData({...tenderData, budgetMax: text})}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Deadline *</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="YYYY-MM-DD"
+                  value={tenderData.deadline}
+                  onChangeText={(text) => setTenderData({...tenderData, deadline: text})}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Requirements</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="List requirements (one per line)"
+                  value={tenderData.requirements}
+                  onChangeText={(text) => setTenderData({...tenderData, requirements: text})}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowTenderModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalSubmitButton}
+                  onPress={submitTender}
+                >
+                  <Text style={styles.modalSubmitText}>Create Tender</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -865,6 +1141,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
+    gap: 12,
   },
   loadingText: {
     fontSize: 16,
@@ -1012,6 +1289,96 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#1E40AF',
     fontWeight: '600',
+  },
+  // Phase Management Styles
+  phaseOverview: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  phaseCards: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  phaseCard: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  phaseCardNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  phaseCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  phaseCardDesc: {
+    fontSize: 12,
+    color: '#6B7280',
+    lineHeight: 16,
+  },
+  phaseIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 12,
+    paddingHorizontal: 8,
+  },
+  phaseStep: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  phaseCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  phaseCircleActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  phaseNumber: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+  },
+  phaseNumberActive: {
+    color: '#FFFFFF',
+  },
+  phaseLabel: {
+    fontSize: 10,
+    color: '#6B7280',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  phaseLine: {
+    height: 2,
+    backgroundColor: '#E5E7EB',
+    marginHorizontal: 8,
+    flex: 0.5,
+  },
+  phaseLineActive: {
+    backgroundColor: '#1E40AF',
   },
   issueCard: {
     backgroundColor: '#F9FAFB',
@@ -1217,7 +1584,7 @@ const styles = StyleSheet.create({
   tenderButton: {
     backgroundColor: '#8B5CF6',
   },
-  statusButton: {
+  resolveButton: {
     backgroundColor: '#10B981',
   },
   viewButton: {
@@ -1314,11 +1681,96 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontWeight: '700',
   },
-  comingSoon: {
+  navigationCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  navigationTitle: {
     fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  navigationDescription: {
+    fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
-    marginTop: 60,
+  },
+  // Settings Styles
+  settingsSection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  settingsGroupTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  settingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  settingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  settingDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  settingArrow: {
+    fontSize: 24,
+    color: '#9CA3AF',
+  },
+  healthMetrics: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  healthMetric: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+  },
+  healthValue: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  healthLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
   },
   modalOverlay: {
     flex: 1,
@@ -1327,13 +1779,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  modalScrollView: {
+    maxHeight: '90%',
+    width: '100%',
+  },
   modalContent: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 24,
     width: '100%',
     maxWidth: 400,
-    maxHeight: '80%',
   },
   modalTitle: {
     fontSize: 20,
@@ -1359,6 +1814,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     color: '#111827',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
   },
   pickerContainer: {
     gap: 8,
